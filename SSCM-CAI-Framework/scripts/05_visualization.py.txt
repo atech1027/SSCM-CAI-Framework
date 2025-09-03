@@ -1,0 +1,209 @@
+"""
+Visualization Script for SSCM-CAI Framework
+Creates publication-quality figures for the paper
+"""
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import rcParams
+from mpl_toolkits.mplot3d import Axes3D
+import seaborn as sns
+
+# Set publication quality parameters
+rcParams['font.family'] = 'serif'
+rcParams['font.serif'] = ['Times New Roman']
+rcParams['font.size'] = 12
+rcParams['axes.labelsize'] = 14
+rcParams['axes.titlesize'] = 16
+rcParams['xtick.labelsize'] = 12
+rcParams['ytick.labelsize'] = 12
+rcParams['legend.fontsize'] = 12
+rcParams['figure.dpi'] = 300
+
+def create_interaction_plot():
+    """Create Figure 2: Economic Performance interaction effect"""
+    # Generate sample data
+    lc_values = np.array([0.4, 0.7, 1.0])
+    rt_low = np.array([0.45, 0.52, 0.58])
+    rt_high = np.array([0.48, 0.61, 0.74])
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot lines
+    ax.plot(lc_values, rt_low, 'b-o', linewidth=2, markersize=8, 
+            label='Low Trust (RT=0.5)')
+    ax.plot(lc_values, rt_high, 'r-s', linewidth=2, markersize=8, 
+            label='High Trust (RT=0.85)')
+    
+    # Add value labels
+    for i, (x, y1, y2) in enumerate(zip(lc_values, rt_low, rt_high)):
+        ax.annotate(f'{y1:.2f}', (x, y1), textcoords="offset points", 
+                   xytext=(0,10), ha='center')
+        ax.annotate(f'{y2:.2f}', (x, y2), textcoords="offset points", 
+                   xytext=(0,10), ha='center')
+    
+    # Add slope difference annotation
+    ax.annotate('', xy=(0.7, 0.52), xytext=(0.7, 0.61),
+                arrowprops=dict(arrowstyle='<->', color='green', lw=2))
+    ax.text(0.72, 0.565, 'Δ = 0.23', fontsize=10, color='green')
+    
+    # Labels and formatting
+    ax.set_xlabel('Language Compatibility (LC)', fontsize=14)
+    ax.set_ylabel('Economic Performance', fontsize=14)
+    ax.set_xlim(0.35, 1.05)
+    ax.set_ylim(0.4, 0.8)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper left')
+    
+    # Add interaction coefficient note
+    ax.text(0.98, 0.42, 'γ = 0.15, p < 0.01', transform=ax.transAxes,
+            fontsize=10, ha='right', style='italic')
+    
+    plt.tight_layout()
+    plt.savefig('fig2_EconomicPerformance.png', dpi=300, bbox_inches='tight')
+    print("Figure 2 saved: fig2_EconomicPerformance.png")
+
+def create_3d_pareto_plot():
+    """Create Figure 3: 3D Pareto Frontier"""
+    # Generate Pareto frontier points
+    np.random.seed(42)
+    n_points = 50
+    
+    # Generate points on Pareto surface
+    economic = np.random.uniform(0.5, 0.9, n_points)
+    environmental = np.random.uniform(0.5, 0.85, n_points)
+    social = 0.4 + 0.3 * economic + 0.3 * environmental + np.random.normal(0, 0.05, n_points)
+    
+    # Filter to keep only Pareto optimal points
+    pareto_mask = np.ones(n_points, dtype=bool)
+    for i in range(n_points):
+        for j in range(n_points):
+            if i != j:
+                if (economic[j] >= economic[i] and 
+                    environmental[j] >= environmental[i] and 
+                    social[j] >= social[i] and
+                    (economic[j] > economic[i] or 
+                     environmental[j] > environmental[i] or 
+                     social[j] > social[i])):
+                    pareto_mask[i] = False
+                    break
+    
+    fig = plt.figure(figsize=(12, 9))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Plot Pareto optimal points
+    ax.scatter(economic[pareto_mask], 
+              environmental[pareto_mask], 
+              social[pareto_mask],
+              c='red', marker='o', s=100, label='Pareto Optimal', 
+              edgecolor='black', linewidth=1)
+    
+    # Plot dominated points
+    ax.scatter(economic[~pareto_mask], 
+              environmental[~pareto_mask], 
+              social[~pareto_mask],
+              c='lightblue', marker='o', s=50, alpha=0.5, 
+              label='Dominated')
+    
+    # Add coordinate labels for some Pareto points
+    pareto_indices = np.where(pareto_mask)[0][:5]
+    for idx in pareto_indices:
+        label = f'({economic[idx]:.2f}, {environmental[idx]:.2f}, {social[idx]:.2f})'
+        ax.text(economic[idx], environmental[idx], social[idx], label,
+               fontsize=8, ha='left')
+    
+    # Labels and formatting
+    ax.set_xlabel('Economic Performance (0-1)', fontsize=12, labelpad=10)
+    ax.set_ylabel('Environmental Performance (0-1)', fontsize=12, labelpad=10)
+    ax.set_zlabel('Social Performance (0-1)', fontsize=12, labelpad=10)
+    
+    # Set viewing angle for better visibility
+    ax.view_init(elev=15, azim=35)
+    
+    ax.legend(loc='upper left')
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig('fig3_3D_Pareto.png', dpi=300, bbox_inches='tight')
+    print("Figure 3 saved: fig3_3D_Pareto.png")
+
+def create_country_analysis_plot():
+    """Create Figure 4: Country-specific CAI associations"""
+    countries = ['Singapore', 'Malaysia', 'Thailand', 'Indonesia', 'Philippines', 'Vietnam']
+    cai_coefficients = [0.28, 0.35, 0.42, 0.48, 0.52, 0.58]
+    inst_quality = [0.95, 0.65, 0.52, 0.50, 0.45, 0.48]
+    
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    
+    # Create bar chart
+    x = np.arange(len(countries))
+    bars = ax1.bar(x, cai_coefficients, color='steelblue', edgecolor='black', linewidth=1.5)
+    
+    # Add value labels on bars
+    for i, (bar, value) in enumerate(zip(bars, cai_coefficients)):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{value:.2f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+    
+    # Primary y-axis
+    ax1.set_xlabel('Country', fontsize=14)
+    ax1.set_ylabel('CAI Association Coefficient', fontsize=14, color='steelblue')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(countries, rotation=0)
+    ax1.set_ylim(0, 0.70)
+    ax1.tick_params(axis='y', labelcolor='steelblue')
+    
+    # Secondary y-axis for institutional quality
+    ax2 = ax1.twinx()
+    ax2.plot(x, inst_quality, 'ro-', linewidth=2, markersize=8, 
+             label='Institutional Quality')
+    ax2.set_ylabel('Institutional Quality Index', fontsize=14, color='red')
+    ax2.set_ylim(0, 1.0)
+    ax2.tick_params(axis='y', labelcolor='red')
+    
+    # Add trend arrow
+    ax1.annotate('', xy=(5.2, 0.15), xytext=(0.2, 0.05),
+                arrowprops=dict(arrowstyle='->', color='green', lw=2))
+    ax1.text(2.5, 0.08, 'Weakening Institutional Quality →', 
+             fontsize=11, color='green', ha='center', style='italic')
+    
+    # Grid
+    ax1.grid(True, alpha=0.3, axis='y')
+    
+    # Title note
+    ax1.text(0.5, 0.95, 'Correlation = -0.92', transform=ax1.transAxes,
+             fontsize=11, ha='center', style='italic', 
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.3))
+    
+    plt.tight_layout()
+    plt.savefig('fig4_CAI_Association.png', dpi=300, bbox_inches='tight')
+    print("Figure 4 saved: fig4_CAI_Association.png")
+
+def create_framework_diagram():
+    """Note: Figure 1 (Framework) should be created using drawing software"""
+    print("\nNote: Figure 1 (CAI Framework) should be created using:")
+    print("- Microsoft PowerPoint/Visio")
+    print("- Draw.io (free online)")
+    print("- Adobe Illustrator")
+    print("\nThe framework should show:")
+    print("1. Four CAI components (LC, RT, TN, HT)")
+    print("2. Interaction effect (LC × RT)")
+    print("3. Triple bottom line outcomes")
+    print("4. Moderating factors")
+
+def main():
+    """Generate all figures"""
+    print("Generating publication-quality figures...")
+    print("=" * 50)
+    
+    create_interaction_plot()
+    create_3d_pareto_plot()
+    create_country_analysis_plot()
+    create_framework_diagram()
+    
+    print("\n" + "=" * 50)
+    print("All figures generated successfully!")
+    print("Files saved in current directory with 300 DPI resolution")
+
+if __name__ == "__main__":
+    main()

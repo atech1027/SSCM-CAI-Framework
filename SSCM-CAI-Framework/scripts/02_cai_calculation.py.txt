@@ -1,0 +1,223 @@
+"""
+Cultural Affinity Index (CAI) Calculation Script
+Author: Tsai Hsin Jiang & Yung Chia Chang
+Date: 2025
+Description: Calculate CAI scores for Southeast Asian country pairs
+"""
+
+import pandas as pd
+import numpy as np
+from scipy.stats import entropy
+import warnings
+warnings.filterwarnings('ignore')
+
+class CAICalculator:
+    """Calculate Cultural Affinity Index for country pairs"""
+    
+    def __init__(self):
+        # Weights determined by entropy method
+        self.weights = {
+            'LC': 0.25,  # Language Compatibility
+            'RT': 0.30,  # Regional Trust
+            'TN': 0.25,  # Trade Networks
+            'HT': 0.20   # Historical Trade
+        }
+        self.gamma = 0.15  # Interaction coefficient for LC×RT
+        
+        # Language compatibility matrix
+        self.language_matrix = {
+            ('Thailand', 'Thailand'): 1.00,
+            ('Thailand', 'Vietnam'): 0.40,
+            ('Thailand', 'Malaysia'): 0.70,  # English as lingua franca
+            ('Thailand', 'Indonesia'): 0.40,
+            ('Thailand', 'Philippines'): 0.70,
+            ('Thailand', 'Singapore'): 0.70,
+            ('Malaysia', 'Malaysia'): 1.00,
+            ('Malaysia', 'Singapore'): 0.70,
+            ('Malaysia', 'Vietnam'): 0.40,
+            ('Malaysia', 'Indonesia'): 0.70,  # Similar Malay roots
+            ('Malaysia', 'Philippines'): 0.70,
+            ('Indonesia', 'Indonesia'): 1.00,
+            ('Indonesia', 'Philippines'): 0.40,
+            ('Indonesia', 'Vietnam'): 0.40,
+            ('Indonesia', 'Singapore'): 0.70,
+            ('Philippines', 'Philippines'): 1.00,
+            ('Philippines', 'Vietnam'): 0.40,
+            ('Philippines', 'Singapore'): 0.70,
+            ('Vietnam', 'Vietnam'): 1.00,
+            ('Vietnam', 'Singapore'): 0.70,
+            ('Singapore', 'Singapore'): 1.00
+        }
+        
+        # World Governance Indicators (normalized 0-1)
+        self.wgi_scores = {
+            'Thailand': 0.52,
+            'Vietnam': 0.48,
+            'Malaysia': 0.65,
+            'Indonesia': 0.50,
+            'Philippines': 0.45,
+            'Singapore': 0.95
+        }
+    
+    def calculate_language_compatibility(self, country_i, country_j):
+        """Calculate LC score based on linguistic distance"""
+        key = tuple(sorted([country_i, country_j]))
+        return self.language_matrix.get(key, 0.40)
+    
+    def calculate_regional_trust(self, country_i, country_j):
+        """Calculate RT using WGI and ASEAN membership"""
+        inst_i = self.wgi_scores.get(country_i, 0.5)
+        inst_j = self.wgi_scores.get(country_j, 0.5)
+        
+        # All countries in our sample are ASEAN members
+        asean_membership = 1.0
+        
+        # Formula: RT = 0.5 × Inst_i × Inst_j + 0.5 × ASEAN
+        rt = 0.5 * inst_i * inst_j + 0.5 * asean_membership
+        return round(rt, 2)
+    
+    def calculate_trade_networks(self, country_i, country_j):
+        """Calculate TN based on common trading partners"""
+        # Simulated trade network overlap (would use real UN COMTRADE data)
+        if country_i == country_j:
+            return 1.00
+        
+        # Simplified calculation based on regional integration
+        network_overlaps = {
+            ('Thailand', 'Vietnam'): 0.45,
+            ('Thailand', 'Malaysia'): 0.62,
+            ('Thailand', 'Indonesia'): 0.48,
+            ('Thailand', 'Philippines'): 0.42,
+            ('Thailand', 'Singapore'): 0.75,
+            ('Malaysia', 'Singapore'): 0.78,
+            ('Malaysia', 'Vietnam'): 0.52,
+            ('Malaysia', 'Indonesia'): 0.65,
+            ('Malaysia', 'Philippines'): 0.48,
+            ('Indonesia', 'Philippines'): 0.38,
+            ('Indonesia', 'Vietnam'): 0.41,
+            ('Indonesia', 'Singapore'): 0.68,
+            ('Philippines', 'Vietnam'): 0.35,
+            ('Philippines', 'Singapore'): 0.62,
+            ('Vietnam', 'Singapore'): 0.71
+        }
+        
+        key = tuple(sorted([country_i, country_j]))
+        return network_overlaps.get(key, 0.40)
+    
+    def calculate_historical_trade(self, country_i, country_j):
+        """Calculate HT from 5-year bilateral trade average"""
+        if country_i == country_j:
+            return 1.00
+        
+        # Simplified historical trade intensity (would use real UN COMTRADE data)
+        historical_trade = {
+            ('Thailand', 'Vietnam'): 0.52,
+            ('Thailand', 'Malaysia'): 0.68,
+            ('Thailand', 'Indonesia'): 0.45,
+            ('Thailand', 'Philippines'): 0.38,
+            ('Thailand', 'Singapore'): 0.78,
+            ('Malaysia', 'Singapore'): 0.85,
+            ('Malaysia', 'Vietnam'): 0.58,
+            ('Malaysia', 'Indonesia'): 0.62,
+            ('Malaysia', 'Philippines'): 0.45,
+            ('Indonesia', 'Philippines'): 0.42,
+            ('Indonesia', 'Vietnam'): 0.38,
+            ('Indonesia', 'Singapore'): 0.65,
+            ('Philippines', 'Vietnam'): 0.32,
+            ('Philippines', 'Singapore'): 0.58,
+            ('Vietnam', 'Singapore'): 0.72
+        }
+        
+        key = tuple(sorted([country_i, country_j]))
+        return historical_trade.get(key, 0.30)
+    
+    def calculate_cai(self, country_i, country_j):
+        """Calculate final CAI scores (linear and interaction)"""
+        # Calculate components
+        lc = self.calculate_language_compatibility(country_i, country_j)
+        rt = self.calculate_regional_trust(country_i, country_j)
+        tn = self.calculate_trade_networks(country_i, country_j)
+        ht = self.calculate_historical_trade(country_i, country_j)
+        
+        # Linear CAI
+        cai_linear = (self.weights['LC'] * lc + 
+                     self.weights['RT'] * rt + 
+                     self.weights['TN'] * tn + 
+                     self.weights['HT'] * ht)
+        
+        # CAI with interaction term
+        cai_interaction = cai_linear + self.gamma * lc * rt
+        
+        return {
+            'LC': lc,
+            'RT': rt,
+            'TN': tn,
+            'HT': ht,
+            'CAI_linear': round(cai_linear, 2),
+            'CAI_interaction': round(cai_interaction, 2)
+        }
+    
+    def calculate_entropy_weights(self, data_df):
+        """Calculate weights using entropy method"""
+        # Normalize data
+        normalized = data_df / data_df.sum(axis=0)
+        
+        # Calculate entropy
+        entropies = []
+        for col in normalized.columns:
+            e = -np.sum(normalized[col] * np.log(normalized[col] + 1e-10)) / np.log(len(normalized))
+            entropies.append(e)
+        
+        # Calculate weights
+        differences = [1 - e for e in entropies]
+        weights = [d / sum(differences) for d in differences]
+        
+        return dict(zip(normalized.columns, weights))
+
+def main():
+    """Main execution function"""
+    calculator = CAICalculator()
+    
+    # Define countries
+    countries = ['Thailand', 'Vietnam', 'Malaysia', 'Indonesia', 'Philippines', 'Singapore']
+    
+    # Calculate CAI for all pairs
+    results = []
+    for i, country_i in enumerate(countries):
+        for j, country_j in enumerate(countries):
+            if i <= j:  # Avoid duplicates
+                scores = calculator.calculate_cai(country_i, country_j)
+                results.append({
+                    'Country_i': country_i,
+                    'Country_j': country_j,
+                    **scores
+                })
+    
+    # Create DataFrame
+    df = pd.DataFrame(results)
+    
+    # Display results
+    print("CAI Calculation Results")
+    print("=" * 80)
+    print(df.to_string(index=False))
+    
+    # Save to CSV
+    df.to_csv('cai_results.csv', index=False)
+    print("\nResults saved to 'cai_results.csv'")
+    
+    # Calculate summary statistics
+    print("\nSummary Statistics")
+    print("-" * 40)
+    print(f"Mean CAI (Linear): {df['CAI_linear'].mean():.3f}")
+    print(f"Mean CAI (Interaction): {df['CAI_interaction'].mean():.3f}")
+    print(f"Max CAI: {df['CAI_interaction'].max():.3f}")
+    print(f"Min CAI: {df['CAI_interaction'].min():.3f}")
+    
+    # Show top 5 country pairs by CAI
+    print("\nTop 5 Country Pairs by CAI (with interaction)")
+    print("-" * 40)
+    top_pairs = df.nlargest(5, 'CAI_interaction')[['Country_i', 'Country_j', 'CAI_interaction']]
+    print(top_pairs.to_string(index=False))
+
+if __name__ == "__main__":
+    main()

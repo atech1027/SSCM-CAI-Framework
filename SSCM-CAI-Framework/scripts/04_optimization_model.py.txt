@@ -1,0 +1,358 @@
+"""
+Multi-Objective Optimization Model for SSCM
+Using NSGA-II algorithm for Pareto frontier identification
+Author: Tsai Hsin Jiang & Yung Chia Chang
+Date: 2025
+"""
+
+import numpy as np
+import pandas as pd
+from scipy.optimize import differential_evolution
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import random
+
+class SSCMOptimizer:
+    """
+    Multi-objective optimization for sustainable supply chain management
+    """
+    
+    def __init__(self, cai_data, performance_data):
+        """Initialize with CAI and performance data"""
+        self.cai_data = cai_data
+        self.performance_data = performance_data
+        self.n_suppliers = len(cai_data)
+        self.population_size = 200
+        self.n_generations = 500
+        self.mutation_rate = 0.1
+        self.crossover_rate = 0.8
+        
+    def objective_functions(self, x):
+        """
+        Calculate three objectives: economic, environmental, social
+        x: binary vector of supplier selection
+        """
+        # Economic objective
+        economic = np.sum(x * self.cai_data['CAI'] * self.performance_data['economic'])
+        
+        # Environmental objective
+        environmental = np.sum(x * self.cai_data['CAI'] * self.performance_data['environmental'])
+        
+        # Social objective
+        social = np.sum(x * self.cai_data['CAI'] * self.performance_data['social'])
+        
+        return economic, environmental, social
+    
+    def constraints_satisfied(self, x):
+        """Check if solution satisfies constraints"""
+        # Each buyer has exactly one supplier
+        if np.sum(x) < 1:
+            return False
+        
+        # Minimum CAI threshold
+        selected_cai = self.cai_data['CAI'][x == 1]
+        if len(selected_cai) > 0 and np.min(selected_cai) < 0.4:
+            return False
+        
+        return True
+    
+    def dominates(self, sol1, sol2):
+        """Check if solution 1 dominates solution 2"""
+        # All objectives should be better or equal
+        all_better_or_equal = all(s1 >= s2 for s1, s2 in zip(sol1, sol2))
+        # At least one objective should be strictly better
+        at_least_one_better = any(s1 > s2 for s1, s2 in zip(sol1, sol2))
+        
+        return all_better_or_equal and at_least_one_better
+    
+    def fast_non_dominated_sort(self, population, objectives):
+        """Fast non-dominated sorting for NSGA-II"""
+        n = len(population)
+        domination_count = [0] * n
+        dominated_solutions = [[] for _ in range(n)]
+        fronts = [[]]
+        
+        # Calculate domination relationships
+        for i in range(n):
+            for j in range(i+1, n):
+                if self.dominates(objectives[i], objectives[j]):
+                    dominated_solutions[i].append(j)
+                    domination_count[j] += 1
+                elif self.dominates(objectives[j], objectives[i]):
+                    dominated_solutions[j].append(i)
+                    domination_count[i] += 1
+        
+        # Find first Pareto front
+        for i in range(n):
+            if domination_count[i] == 0:
+                fronts[0].append(i)
+        
+        # Find remaining fronts
+        current_front = 0
+        while fronts[current_front]:
+            next_front = []
+            for i in fronts[current_front]:
+                for j in dominated_solutions[i]:
+                    domination_count[j] -= 1
+                    if domination_count[j] == 0:
+                        next_front.append(j)
+            if next_front:
+                fronts.append(next_front)
+            current_front += 1
+        
+        return fronts[:-1]  # Remove empty last front
+    
+    def crowding_distance(self, objectives):
+        """Calculate crowding distance for diversity preservation"""
+        n = len(objectives)
+        if n <= 2:
+            return [float('inf')] * n
+        
+        distance = [0] * n
+        n_objectives = len(objectives[0])
+        
+        for m in range(n_objectives):
+            # Sort by m-th objective
+            sorted_indices = sorted(range(n), key=lambda i: objectives[i][m])
+            
+            # Boundary points get infinite distance
+            distance[sorted_indices[0]] = float('inf')
+            distance[sorted_indices[-1]] = float('inf')
+            
+            # Calculate distance for intermediate points
+            obj_range = objectives[sorted_indices[-1]][m] - objectives[sorted_indices[0]][m]
+            if obj_range > 0:
+                for i in range(1, n-1):
+                    distance[sorted_indices[i]] += (
+                        objectives[sorted_indices[i+1]][m] - 
+                        objectives[sorted_indices[i-1]][m]
+                    ) / obj_range
+        
+        return distance
+    
+    def nsga2(self):
+        """NSGA-II algorithm implementation"""
+        print("Running NSGA-II optimization...")
+        print("=" * 50)
+        
+        # Initialize population
+        population = []
+        for _ in range(self.population_size):
+            individual = np.random.choice([0, 1], size=self.n_suppliers)
+            # Ensure at least one supplier is selected
+            if np.sum(individual) == 0:
+                individual[np.random.randint(self.n_suppliers)] = 1
+            population.append(individual)
+        
+        # Evolution loop
+        for generation in range(self.n_generations):
+            # Calculate objectives for current population
+            objectives = [self.objective_functions(ind) for ind in population]
+            
+            # Non-dominated sorting
+            fronts = self.fast_non_dominated_sort(population, objectives)
+            
+            # Create offspring population
+            offspring = []
+            while len(offspring) < self.population_size:
+                # Tournament selection
+                parent1 = self.tournament_selection(population, objectives, fronts)
+                parent2 = self.tournament_selection(population, objectives, fronts)
+                
+                # Crossover
+                if random.random() < self.crossover_rate:
+                    child1, child2 = self.crossover(parent1, parent2)
+                else:
+                    child1, child2 = parent1.copy(), parent2.copy()
+                
+                # Mutation
+                if random.random() < self.mutation_rate:
+                    child1 = self.mutate(child1)
+                if random.random() < self.mutation_rate:
+                    child2 = self.mutate(child2)
+                
+                offspring.extend([child1, child2])
+            
+            # Combine parent and offspring populations
+            combined_population = population + offspring[:self.population_size]
+            combined_objectives = objectives + [self.objective_functions(ind) 
+                                               for ind in offspring[:self.population_size]]
+            
+            # Select next generation
+            population = self.environmental_selection(combined_population, 
+                                                     combined_objectives)
+            
+            # Progress report
+            if (generation + 1) % 100 == 0:
+                pareto_front = [combined_objectives[i] for i in fronts[0]]
+                print(f"Generation {generation + 1}: Pareto front size = {len(pareto_front)}")
+        
+        # Final results
+        final_objectives = [self.objective_functions(ind) for ind in population]
+        final_fronts = self.fast_non_dominated_sort(population, final_objectives)
+        pareto_solutions = [population[i] for i in final_fronts[0]]
+        pareto_objectives = [final_objectives[i] for i in final_fronts[0]]
+        
+        return pareto_solutions, pareto_objectives
+    
+    def tournament_selection(self, population, objectives, fronts):
+        """Tournament selection for parent selection"""
+        tournament_size = 3
+        candidates = random.sample(range(len(population)), tournament_size)
+        
+        # Find best candidate based on front rank
+        best_candidate = candidates[0]
+        best_front = None
+        
+        for front_idx, front in enumerate(fronts):
+            for candidate in candidates:
+                if candidate in front:
+                    if best_front is None or front_idx < best_front:
+                        best_candidate = candidate
+                        best_front = front_idx
+        
+        return population[best_candidate].copy()
+    
+    def crossover(self, parent1, parent2):
+        """Single-point crossover"""
+        point = random.randint(1, len(parent1) - 1)
+        child1 = np.concatenate([parent1[:point], parent2[point:]])
+        child2 = np.concatenate([parent2[:point], parent1[point:]])
+        return child1, child2
+    
+    def mutate(self, individual):
+        """Bit-flip mutation"""
+        mutated = individual.copy()
+        for i in range(len(mutated)):
+            if random.random() < 0.1:  # Per-bit mutation probability
+                mutated[i] = 1 - mutated[i]
+        
+        # Ensure at least one supplier is selected
+        if np.sum(mutated) == 0:
+            mutated[random.randint(0, len(mutated)-1)] = 1
+        
+        return mutated
+    
+    def environmental_selection(self, population, objectives):
+        """Select next generation based on non-domination and crowding"""
+        fronts = self.fast_non_dominated_sort(population, objectives)
+        next_population = []
+        
+        for front in fronts:
+            if len(next_population) + len(front) <= self.population_size:
+                next_population.extend([population[i] for i in front])
+            else:
+                # Use crowding distance for remaining slots
+                remaining = self.population_size - len(next_population)
+                front_objectives = [objectives[i] for i in front]
+                distances = self.crowding_distance(front_objectives)
+                
+                # Sort by crowding distance and select
+                sorted_indices = sorted(range(len(front)), 
+                                      key=lambda i: distances[i], 
+                                      reverse=True)
+                for i in sorted_indices[:remaining]:
+                    next_population.append(population[front[i]])
+                break
+        
+        return next_population
+    
+    def visualize_pareto_front(self, pareto_objectives, save_path='pareto_front.png'):
+        """Visualize 3D Pareto frontier"""
+        fig = plt.figure(figsize=(12, 9))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Extract objectives
+        economic = [obj[0] for obj in pareto_objectives]
+        environmental = [obj[1] for obj in pareto_objectives]
+        social = [obj[2] for obj in pareto_objectives]
+        
+        # Plot Pareto front
+        ax.scatter(economic, environmental, social, 
+                  c='red', marker='o', s=100, 
+                  edgecolor='black', linewidth=1,
+                  label='Pareto Optimal Solutions')
+        
+        # Labels and formatting
+        ax.set_xlabel('Economic Performance', fontsize=12)
+        ax.set_ylabel('Environmental Performance', fontsize=12)
+        ax.set_zlabel('Social Performance', fontsize=12)
+        ax.legend()
+        
+        # Set viewing angle
+        ax.view_init(elev=20, azim=45)
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300)
+        print(f"Pareto front visualization saved to {save_path}")
+        
+        return fig
+
+def main():
+    """Main execution"""
+    print("Multi-Objective Optimization for SSCM")
+    print("=" * 70)
+    
+    # Generate sample data
+    np.random.seed(42)
+    n_suppliers = 50
+    
+    # CAI data
+    cai_data = pd.DataFrame({
+        'supplier_id': range(n_suppliers),
+        'CAI': np.random.uniform(0.3, 0.9, n_suppliers)
+    })
+    
+    # Performance data (normalized 0-1)
+    performance_data = pd.DataFrame({
+        'supplier_id': range(n_suppliers),
+        'economic': np.random.uniform(0.4, 0.9, n_suppliers),
+        'environmental': np.random.uniform(0.3, 0.85, n_suppliers),
+        'social': np.random.uniform(0.35, 0.88, n_suppliers)
+    })
+    
+    # Initialize optimizer
+    optimizer = SSCMOptimizer(cai_data, performance_data)
+    
+    # Run optimization
+    pareto_solutions, pareto_objectives = optimizer.nsga2()
+    
+    # Results summary
+    print("\n" + "=" * 70)
+    print(f"Optimization complete!")
+    print(f"Number of Pareto optimal solutions: {len(pareto_solutions)}")
+    
+    # Display top solutions
+    print("\nTop 5 Pareto Optimal Solutions:")
+    print("-" * 50)
+    for i in range(min(5, len(pareto_objectives))):
+        eco, env, soc = pareto_objectives[i]
+        print(f"Solution {i+1}: Economic={eco:.3f}, Environmental={env:.3f}, Social={soc:.3f}")
+    
+    # Calculate improvements
+    baseline_economic = np.mean(performance_data['economic'])
+    baseline_environmental = np.mean(performance_data['environmental'])
+    baseline_social = np.mean(performance_data['social'])
+    
+    best_economic = max(obj[0] for obj in pareto_objectives)
+    best_environmental = max(obj[1] for obj in pareto_objectives)
+    best_social = max(obj[2] for obj in pareto_objectives)
+    
+    print("\nImprovements over baseline:")
+    print("-" * 50)
+    print(f"Economic: {(best_economic/baseline_economic - 1)*100:.1f}%")
+    print(f"Environmental: {(best_environmental/baseline_environmental - 1)*100:.1f}%")
+    print(f"Social: {(best_social/baseline_social - 1)*100:.1f}%")
+    
+    # Visualize Pareto front
+    optimizer.visualize_pareto_front(pareto_objectives, 
+                                    save_path='results/pareto_front_3d.png')
+    
+    # Save results
+    results_df = pd.DataFrame(pareto_objectives, 
+                             columns=['Economic', 'Environmental', 'Social'])
+    results_df.to_csv('results/pareto_solutions.csv', index=False)
+    print("\nResults saved to 'results/pareto_solutions.csv'")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,293 @@
+"""
+Data Extraction Script for UN COMTRADE and World Bank Data
+Author: Tsai Hsin Jiang & Yung Chia Chang
+Date: 2025
+Description: Extract and process data from public APIs
+"""
+
+import pandas as pd
+import requests
+import json
+import time
+from datetime import datetime
+import os
+
+class DataExtractor:
+    """Extract data from public sources"""
+    
+    def __init__(self):
+        self.countries = {
+            'Thailand': 'THA',
+            'Vietnam': 'VNM',
+            'Malaysia': 'MYS',
+            'Indonesia': 'IDN',
+            'Philippines': 'PHL',
+            'Singapore': 'SGP'
+        }
+        
+        # Create output directory
+        if not os.path.exists('data/raw'):
+            os.makedirs('data/raw')
+    
+    def get_un_comtrade_data(self, reporter, partner, year, hs_codes):
+        """
+        Extract bilateral trade data from UN COMTRADE
+        Note: UN COMTRADE API has rate limits, be careful with requests
+        """
+        base_url = "https://comtrade.un.org/api/get"
+        
+        # Parameters for API call
+        params = {
+            'r': reporter,  # Reporter country code
+            'p': partner,   # Partner country code
+            'ps': year,     # Time period
+            'fmt': 'json',  # Format
+            'type': 'C',    # Commodities
+            'freq': 'A',    # Annual
+            'px': 'HS',     # Classification
+            'cc': hs_codes  # HS codes (84-87)
+        }
+        
+        try:
+            response = requests.get(base_url, params=params, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('dataset', [])
+            else:
+                print(f"Error: Status code {response.status_code}")
+                return []
+        except Exception as e:
+            print(f"Error fetching data: {e}")
+            return []
+    
+    def get_world_bank_data(self, indicator, countries, start_year, end_year):
+        """
+        Extract data from World Bank API
+        Example indicators:
+        - NY.GDP.PCAP.CD: GDP per capita
+        - EN.ATM.CO2E.PC: CO2 emissions per capita
+        """
+        base_url = f"https://api.worldbank.org/v2/country/{';'.join(countries)}/indicator/{indicator}"
+        
+        params = {
+            'date': f'{start_year}:{end_year}',
+            'format': 'json',
+            'per_page': 500
+        }
+        
+        try:
+            response = requests.get(base_url, params=params, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                if len(data) > 1:
+                    return data[1]  # Second element contains actual data
+            return []
+        except Exception as e:
+            print(f"Error fetching World Bank data: {e}")
+            return []
+    
+    def extract_trade_data(self):
+        """Extract bilateral trade data for all country pairs"""
+        print("Extracting UN COMTRADE data...")
+        print("=" * 50)
+        
+        trade_data = []
+        years = range(2019, 2024)
+        hs_codes = "84,85,86,87"  # Machinery and transport equipment
+        
+        for year in years:
+            for reporter in self.countries.values():
+                for partner in self.countries.values():
+                    print(f"Fetching: {reporter} -> {partner} ({year})")
+                    
+                    # Get data from API
+                    data = self.get_un_comtrade_data(reporter, partner, year, hs_codes)
+                    
+                    # Process and store data
+                    for record in data:
+                        trade_data.append({
+                            'year': year,
+                            'reporter': reporter,
+                            'partner': partner,
+                            'trade_flow': record.get('rtTitle', ''),
+                            'hs_code': record.get('cmdCode', ''),
+                            'commodity': record.get('cmdDescE', ''),
+                            'trade_value_usd': record.get('TradeValue', 0),
+                            'quantity': record.get('NetWeight', 0)
+                        })
+                    
+                    # Rate limiting (be respectful of API)
+                    time.sleep(1)
+        
+        # Save to CSV
+        df = pd.DataFrame(trade_data)
+        df.to_csv('data/raw/un_comtrade_raw.csv', index=False)
+        print(f"\nSaved {len(df)} trade records to 'data/raw/un_comtrade_raw.csv'")
+        return df
+    
+    def extract_world_bank_indicators(self):
+        """Extract World Bank indicators"""
+        print("\nExtracting World Bank data...")
+        print("=" * 50)
+        
+        indicators = {
+            'NY.GDP.PCAP.CD': 'gdp_per_capita',
+            'EN.ATM.CO2E.PC': 'co2_emissions_pc',
+            'SL.UEM.TOTL.ZS': 'unemployment_rate',
+            'SE.XPD.TOTL.GD.ZS': 'education_expenditure'
+        }
+        
+        wb_data = []
+        countries = list(self.countries.values())
+        
+        for indicator_code, indicator_name in indicators.items():
+            print(f"Fetching indicator: {indicator_name}")
+            
+            data = self.get_world_bank_data(indicator_code, countries, 2019, 2023)
+            
+            for record in data:
+                if record:
+                    wb_data.append({
+                        'country_code': record.get('country', {}).get('id', ''),
+                        'country_name': record.get('country', {}).get('value', ''),
+                        'indicator': indicator_name,
+                        'year': record.get('date', ''),
+                        'value': record.get('value', None)
+                    })
+            
+            time.sleep(1)  # Rate limiting
+        
+        # Save to CSV
+        df = pd.DataFrame(wb_data)
+        df.to_csv('data/raw/world_bank_indicators.csv', index=False)
+        print(f"\nSaved {len(df)} indicator records to 'data/raw/world_bank_indicators.csv'")
+        return df
+    
+    def extract_hofstede_dimensions(self):
+        """
+        Extract Hofstede cultural dimensions
+        Note: Hofstede doesn't have a public API, so we use pre-collected data
+        """
+        print("\nProcessing Hofstede cultural dimensions...")
+        print("=" * 50)
+        
+        hofstede_data = {
+            'Thailand': {'PDI': 64, 'IDV': 20, 'MAS': 34, 'UAI': 64, 'LTO': 32, 'IVR': 45},
+            'Vietnam': {'PDI': 70, 'IDV': 20, 'MAS': 40, 'UAI': 30, 'LTO': 57, 'IVR': 35},
+            'Malaysia': {'PDI': 100, 'IDV': 26, 'MAS': 50, 'UAI': 36, 'LTO': 41, 'IVR': 57},
+            'Indonesia': {'PDI': 78, 'IDV': 14, 'MAS': 46, 'UAI': 48, 'LTO': 62, 'IVR': 38},
+            'Philippines': {'PDI': 94, 'IDV': 32, 'MAS': 64, 'UAI': 44, 'LTO': 27, 'IVR': 42},
+            'Singapore': {'PDI': 74, 'IDV': 20, 'MAS': 48, 'UAI': 8, 'LTO': 72, 'IVR': 46}
+        }
+        
+        # Convert to DataFrame
+        df = pd.DataFrame.from_dict(hofstede_data, orient='index')
+        df.index.name = 'country'
+        df.reset_index(inplace=True)
+        
+        # Save to CSV
+        df.to_csv('data/raw/hofstede_dimensions.csv', index=False)
+        print(f"Saved Hofstede dimensions for {len(df)} countries")
+        return df
+    
+    def process_raw_data(self):
+        """Process raw data into analysis-ready format"""
+        print("\nProcessing raw data...")
+        print("=" * 50)
+        
+        # Load raw data
+        trade_df = pd.read_csv('data/raw/un_comtrade_raw.csv')
+        wb_df = pd.read_csv('data/raw/world_bank_indicators.csv')
+        hofstede_df = pd.read_csv('data/raw/hofstede_dimensions.csv')
+        
+        # Aggregate trade data by country pair and year
+        trade_summary = trade_df.groupby(['year', 'reporter', 'partner']).agg({
+            'trade_value_usd': 'sum',
+            'quantity': 'sum'
+        }).reset_index()
+        
+        # Calculate trade intensity
+        trade_summary['trade_intensity'] = (
+            trade_summary['trade_value_usd'] / 
+            trade_summary['trade_value_usd'].max()
+        )
+        
+        # Pivot World Bank data
+        wb_pivot = wb_df.pivot_table(
+            index=['country_code', 'year'],
+            columns='indicator',
+            values='value'
+        ).reset_index()
+        
+        print("Data processing complete!")
+        print(f"Trade pairs: {len(trade_summary)}")
+        print(f"Country-year observations: {len(wb_pivot)}")
+        
+        # Save processed data
+        trade_summary.to_csv('data/processed/trade_summary.csv', index=False)
+        wb_pivot.to_csv('data/processed/country_indicators.csv', index=False)
+        
+        return trade_summary, wb_pivot
+
+def main():
+    """Main execution"""
+    print("Starting data extraction process...")
+    print("This may take several minutes due to API rate limits")
+    print("=" * 70)
+    
+    extractor = DataExtractor()
+    
+    # Note: Comment out actual API calls during testing
+    # Uncomment these when you want to fetch real data
+    
+    print("\n[DEMO MODE - Not making actual API calls]")
+    print("To fetch real data, uncomment the following lines:")
+    print("# trade_data = extractor.extract_trade_data()")
+    print("# wb_data = extractor.extract_world_bank_indicators()")
+    
+    # For demonstration, create sample data files
+    print("\nCreating sample data files for demonstration...")
+    
+    # Create sample trade data
+    sample_trade = pd.DataFrame({
+        'year': [2023, 2023, 2023],
+        'reporter': ['THA', 'MYS', 'SGP'],
+        'partner': ['VNM', 'SGP', 'THA'],
+        'trade_flow': ['Export', 'Export', 'Export'],
+        'hs_code': ['8708', '8471', '8517'],
+        'commodity': ['Vehicle parts', 'Computers', 'Telecom equipment'],
+        'trade_value_usd': [125430000, 456780000, 234560000],
+        'quantity': [45230, 123456, 67890]
+    })
+    sample_trade.to_csv('data/raw/un_comtrade_raw.csv', index=False)
+    
+    # Create sample World Bank data
+    sample_wb = pd.DataFrame({
+        'country_code': ['THA', 'VNM', 'MYS', 'IDN', 'PHL', 'SGP'] * 4,
+        'country_name': ['Thailand', 'Vietnam', 'Malaysia', 'Indonesia', 'Philippines', 'Singapore'] * 4,
+        'indicator': ['gdp_per_capita'] * 6 + ['co2_emissions_pc'] * 6 + 
+                    ['unemployment_rate'] * 6 + ['education_expenditure'] * 6,
+        'year': [2023] * 24,
+        'value': [7189.0, 3756.0, 12364.0, 4332.0, 3548.0, 72794.0,
+                 3.8, 2.1, 4.9, 2.3, 1.8, 5.2,
+                 1.1, 2.3, 3.3, 5.2, 2.4, 2.0,
+                 4.1, 5.3, 4.8, 5.2, 2.8, 3.0]
+    })
+    sample_wb.to_csv('data/raw/world_bank_indicators.csv', index=False)
+    
+    # Extract Hofstede dimensions (static data)
+    hofstede_data = extractor.extract_hofstede_dimensions()
+    
+    # Process the data
+    trade_summary, country_indicators = extractor.process_raw_data()
+    
+    print("\n" + "=" * 70)
+    print("Data extraction complete!")
+    print("Check the 'data/raw/' and 'data/processed/' directories for output files")
+    print("\nTo fetch real data from APIs:")
+    print("1. Uncomment the API call lines in main()")
+    print("2. Ensure you have stable internet connection")
+    print("3. Be patient - API calls may take 10-15 minutes due to rate limits")
+
+if __name__ == "__main__":
+    main()
